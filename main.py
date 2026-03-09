@@ -48,7 +48,7 @@ bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
 # ---------------- TRANSLATIONS ---------------- #
 T = {
     "ru": {
-        "welcome": "👋 Привет, *{name}*!\n\n🎵 *TikTok Downloader*\n\nСкачиваю TikTok видео *без водяных знаков*\n\n🎁 Бесплатно: *10 видео/день*\n⭐ Premium: *50 видео/день*",
+        "welcome": "👋 Привет, *{name}*!\n\n🎵 *TikTok Downloader*\n\nСкачиваю TikTok видео *без водяных знаков*\n\nОтправь ссылку — скачаю без водяного знака 🎬",
         "welcome_ref": "🎁 Ты перешёл по реферальной ссылке!\nДобро пожаловать в *TikTok Downloader* 🎵",
         "ref_bonus": "🎉 По твоей ссылке зарегистрировался новый пользователь!\n✅ +{bonus} бонусных видео зачислено.",
         "banned": "🚫 Вы заблокированы.",
@@ -61,7 +61,7 @@ T = {
         "progress": "⬇️ Загрузка: {pct}%\n{bar}",
         "fallback": "⏳ Подготовка через резервный метод...",
         "too_big": "⚠️ Файл слишком большой ({mb:.1f} MB). Лимит: {max} MB.",
-        "done": "✅ *Готово!*\nОсталось сегодня: *{left}*",
+        "done": "✅ *Готово!*",
         "error_dl": "❌ Не удалось скачать видео.\n\n• Приватный аккаунт\n• Ссылка устарела\n• Временные проблемы сервиса",
         "btn_download": "📥 Скачать видео", "btn_profile": "👤 Профиль",
         "btn_sub": "⭐ Подписка", "btn_referral": "🔗 Пригласить друга (+3 видео)",
@@ -104,7 +104,7 @@ T = {
         "btn_givesub": "⭐ Дать подписку", "btn_broadcast": "📢 Рассылка", "btn_top": "🏆 Топ",
     },
     "en": {
-        "welcome": "👋 Hey, *{name}*!\n\n🎵 *TikTok Downloader*\n\nDownload TikTok videos *without watermarks*\n\n🎁 Free: *10 videos/day*\n⭐ Premium: *50 videos/day*",
+        "welcome": "👋 Hey, *{name}*!\n\n🎵 *TikTok Downloader*\n\nDownload TikTok videos *without watermarks*\n\nJust send a link — I'll remove the watermark 🎬",
         "welcome_ref": "🎁 You joined via referral!\nWelcome to *TikTok Downloader* 🎵",
         "ref_bonus": "🎉 Someone joined via your link!\n✅ +{bonus} bonus videos added.",
         "banned": "🚫 You are banned.",
@@ -117,7 +117,7 @@ T = {
         "progress": "⬇️ Downloading: {pct}%\n{bar}",
         "fallback": "⏳ Trying fallback method...",
         "too_big": "⚠️ File too large ({mb:.1f} MB). Limit: {max} MB.",
-        "done": "✅ *Done!*\nRemaining today: *{left}*",
+        "done": "✅ *Done!*",
         "error_dl": "❌ Failed to download video.\n\n• Private account\n• Expired link\n• Service issues",
         "btn_download": "📥 Download video", "btn_profile": "👤 Profile",
         "btn_sub": "⭐ Subscription", "btn_referral": "🔗 Invite friend (+3 videos)",
@@ -274,14 +274,10 @@ def check_sub_expired(user: tuple) -> bool:
     return False
 
 def check_limits(user: tuple) -> bool:
-    bonus = user[8] if len(user) > 8 else 0
-    if user[4]: return user[1] < (SUB_LIMIT + bonus)
-    return user[1] < (FREE_LIMIT + bonus)
+    return True  # Безлимитно
 
 def get_remaining(user: tuple) -> int:
-    bonus = user[8] if len(user) > 8 else 0
-    if user[4]: return max(0, SUB_LIMIT + bonus - user[1])
-    return max(0, FREE_LIMIT + bonus - user[1])
+    return -1  # Безлимитно
 
 def update_usage(user: tuple):
     with db_lock:
@@ -342,27 +338,30 @@ def is_supported_url(url: str) -> bool:
     return any(d in url for d in SUPPORTED_DOMAINS)
 
 # ---------------- WATERMARK REMOVAL — 5 API CHAIN ---------------- #
+_session = requests.Session()
+_session.headers.update({"User-Agent": "Mozilla/5.0", "Connection": "keep-alive"})
+
 def _api_tikwm(url):
-    r = requests.get(f"https://tikwm.com/api/?url={url}", timeout=10).json()
+    r = _session.get(f"https://tikwm.com/api/?url={url}", timeout=8).json()
     v = r.get("data", {}).get("play")
     return v if v and v.startswith("http") else None
 
 def _api_musicaldown(url):
     s = requests.Session(); s.headers.update({"User-Agent": "Mozilla/5.0"})
-    page = s.get("https://musicaldown.com/", timeout=10)
+    page = s.get("https://musicaldown.com/", timeout=7)
     m = re.search(r'name="([^"]+)" value="([^"]+)"', page.text)
     if not m: return None
-    r = s.post("https://musicaldown.com/download", data={"id": url, m.group(1): m.group(2)}, timeout=10)
+    r = s.post("https://musicaldown.com/download", data={"id": url, m.group(1): m.group(2)}, timeout=7)
     links = re.findall(r'href="(https://[^"]+\.mp4[^"]*)"', r.text)
     clean = [l for l in links if "wm" not in l.lower()]
     return clean[0] if clean else (links[0] if links else None)
 
 def _api_snaptik(url):
     s = requests.Session(); s.headers.update({"User-Agent": "Mozilla/5.0"})
-    page = s.get("https://snaptik.app/", timeout=10)
+    page = s.get("https://snaptik.app/", timeout=7)
     m = re.search(r'name="token" value="([^"]+)"', page.text)
     if not m: return None
-    r = s.post("https://snaptik.app/abc2.php", data={"url": url, "token": m.group(1)}, timeout=10)
+    r = s.post("https://snaptik.app/abc2.php", data={"url": url, "token": m.group(1)}, timeout=7)
     sm = re.search(r'eval\(atob\("([^"]+)"\)', r.text)
     if not sm: return None
     decoded = base64.b64decode(sm.group(1)).decode("utf-8", errors="ignore")
@@ -371,13 +370,13 @@ def _api_snaptik(url):
     return clean[0] if clean else (links[0] if links else None)
 
 def _api_tikmate(url):
-    r = requests.post("https://tikmate.online/api/lookup", data={"url": url}, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+    r = requests.post("https://tikmate.online/api/lookup", data={"url": url}, headers={"User-Agent": "Mozilla/5.0"}, timeout=7).json()
     token, vid_id = r.get("token"), r.get("id")
     return f"https://tikmate.online/download/{token}/{vid_id}.mp4?hd=1" if token and vid_id else None
 
 def _api_ttsave(url):
     s = requests.Session(); s.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://ttsave.app/"})
-    r = s.post("https://ttsave.app/download", json={"query": url, "language_id": "1"}, timeout=10)
+    r = s.post("https://ttsave.app/download", json={"query": url, "language_id": "1"}, timeout=7)
     links = re.findall(r'https://[^\s"\'<>]+\.mp4[^\s"\'<>]*', r.text)
     return links[0] if links else None
 
@@ -394,7 +393,7 @@ def remove_watermark_api(url: str):
 
 def get_tikwm_meta(url: str) -> dict:
     try:
-        r = requests.get(f"https://tikwm.com/api/?url={url}", timeout=10).json()
+        r = _session.get(f"https://tikwm.com/api/?url={url}", timeout=8).json()
         d = r.get("data", {})
         return {"thumb": d.get("cover") or "https://www.tiktok.com/favicon.ico", "title": (d.get("title") or "TikTok video")[:64]}
     except Exception:
@@ -404,11 +403,6 @@ def get_tikwm_meta(url: str) -> dict:
 def main_menu(uid: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(InlineKeyboardButton(t(uid, "btn_download"), callback_data="download"))
-    kb.add(
-        InlineKeyboardButton(t(uid, "btn_profile"), callback_data="profile"),
-        InlineKeyboardButton(t(uid, "btn_sub"), callback_data="sub"),
-    )
-    kb.add(InlineKeyboardButton(t(uid, "btn_referral"), callback_data="referral"))
     kb.add(
         InlineKeyboardButton(t(uid, "btn_help"), callback_data="help"),
         InlineKeyboardButton(t(uid, "btn_support"), url="https://t.me/ceosocialnetwork"),
@@ -505,19 +499,6 @@ def cmd_start(msg: types.Message):
     if user[5]:
         bot.send_message(uid, t(uid, "banned")); return
 
-    # Referral check
-    args = msg.text.split()
-    if len(args) > 1 and args[1].startswith("ref_"):
-        try:
-            inviter_id = int(args[1][4:])
-            inviter = get_user(inviter_id)
-            if not inviter[5]:
-                if apply_referral(inviter_id, uid):
-                    try: bot.send_message(inviter_id, t(inviter_id, "ref_bonus", bonus=REFERRAL_BONUS))
-                    except Exception: pass
-                    bot.send_message(uid, t(uid, "welcome_ref"))
-        except (ValueError, IndexError): pass
-
     bot.send_message(uid, t(uid, "welcome", name=msg.from_user.first_name), reply_markup=main_menu(uid))
 
 # ---------------- CALLBACK QUERY HANDLER ---------------- #
@@ -528,14 +509,6 @@ def handle_callback(call: types.CallbackQuery):
     data = call.data
     bot.answer_callback_query(call.id)
 
-    # Check sub expiry silently
-    if check_sub_expired(user):
-        user = get_user(uid)
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton(t(uid, "btn_buy"), callback_data="buy"))
-        try: bot.send_message(uid, t(uid, "sub_expired"), reply_markup=kb)
-        except Exception: pass
-
     def edit(text, markup=None):
         try:
             bot.edit_message_text(text, uid, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -544,39 +517,6 @@ def handle_callback(call: types.CallbackQuery):
 
     if data == "download":
         edit(t(uid, "download_hint"), back_kb(uid))
-
-    elif data == "profile":
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton(t(uid, "btn_referral"), callback_data="referral"))
-        kb.add(InlineKeyboardButton(t(uid, "btn_back"), callback_data="back_main"))
-        edit(build_profile_text(uid, user), kb)
-
-    elif data == "sub":
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton(t(uid, "btn_buy"), callback_data="buy"))
-        kb.add(InlineKeyboardButton(t(uid, "btn_back"), callback_data="back_main"))
-        edit(f"{t(uid, 'sub_title')}\n\n{t(uid, 'sub_body')}", kb)
-
-    elif data == "buy":
-        bot.send_invoice(
-            uid,
-            title="Premium",
-            description="50 videos/day",
-            invoice_payload="sub",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="Premium", amount=STAR_PRICE)],
-        )
-
-    elif data == "referral":
-        me = bot.get_me()
-        ref_link = f"https://t.me/{me.username}?start=ref_{uid}"
-        ref_stats = get_referral_stats(uid)
-        text = f"{t(uid, 'ref_title')}\n\n{t(uid, 'ref_body', bonus=REFERRAL_BONUS, link=ref_link, count=ref_stats['count'], total=ref_stats['bonus'])}"
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton(t(uid, "btn_share"), url=f"https://t.me/share/url?url={ref_link}&text=TikTok+без+водяных+знаков!"))
-        kb.add(InlineKeyboardButton(t(uid, "btn_back"), callback_data="back_main"))
-        edit(text, kb)
 
     elif data == "help":
         edit(t(uid, "help_text"), back_kb(uid))
@@ -625,12 +565,6 @@ def handle_callback(call: types.CallbackQuery):
         edit(t(uid, "admin_unban_ask"), kb)
         bot.register_next_step_handler(call.message, admin_action_handler, action="unban")
 
-    elif data == "admin_givesub":
-        if uid != ADMIN_ID: return
-        kb = InlineKeyboardMarkup(); kb.add(InlineKeyboardButton(t(uid, "btn_cancel"), callback_data="admin_menu"))
-        edit(t(uid, "admin_sub_ask"), kb)
-        bot.register_next_step_handler(call.message, admin_action_handler, action="givesub")
-
     elif data == "admin_broadcast":
         if uid != ADMIN_ID: return
         kb = InlineKeyboardMarkup(); kb.add(InlineKeyboardButton(t(uid, "btn_cancel"), callback_data="admin_menu"))
@@ -667,11 +601,7 @@ def admin_action_handler(msg: types.Message, action: str):
         with db_lock:
             cursor.execute("UPDATE users SET banned=0 WHERE telegram_id=?", (target_id,)); conn.commit()
         bot.send_message(uid, t(uid, "admin_unban_ok", id=target_id))
-    elif action == "givesub":
-        expires = (datetime.date.today() + datetime.timedelta(days=SUB_DAYS)).isoformat()
-        with db_lock:
-            cursor.execute("UPDATE users SET subscription=1, downloads_month=0, sub_expires=? WHERE telegram_id=?", (expires, target_id)); conn.commit()
-        bot.send_message(uid, t(uid, "admin_sub_ok", id=target_id))
+
 
 # ---------------- PAYMENT HANDLERS ---------------- #
 @bot.pre_checkout_query_handler(func=lambda q: True)
@@ -703,8 +633,6 @@ def inline_handler(query: types.InlineQuery):
         bot.answer_inline_query(query.id, [], cache_time=0); return
 
     reset_daily(user); user = get_user(uid)
-    if not check_limits(user):
-        bot.answer_inline_query(query.id, [], switch_pm_text="❌ Лимит исчерпан — купи Premium", switch_pm_parameter="sub", cache_time=0); return
 
     try:
         video_url = remove_watermark_api(url)
@@ -747,11 +675,6 @@ def handle_link(msg: types.Message):
     if user[5]:
         bot.send_message(uid, t(uid, "banned")); return
 
-    if check_sub_expired(user):
-        user = get_user(uid)
-        kb = InlineKeyboardMarkup(); kb.add(InlineKeyboardButton(t(uid, "btn_buy"), callback_data="buy"))
-        bot.send_message(uid, t(uid, "sub_expired"), reply_markup=kb)
-
     url = msg.text.strip()
     try: bot.delete_message(uid, msg.message_id)
     except Exception: pass
@@ -760,19 +683,6 @@ def handle_link(msg: types.Message):
         bot.send_message(uid, t(uid, "tiktok_only"), reply_markup=menu_kb(uid)); return
 
     reset_daily(user); user = get_user(uid)
-
-    if not check_limits(user):
-        period = t(uid, "period_month") if user[4] else t(uid, "period_day")
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton(t(uid, "btn_premium"), callback_data="sub"))
-        kb.add(InlineKeyboardButton(t(uid, "btn_menu"), callback_data="back_main"))
-        bot.send_message(uid, t(uid, "limit_reached", period=period), reply_markup=kb); return
-
-    # Warn at 2 remaining
-    remaining = get_remaining(user)
-    if remaining == 2 and not user[4]:
-        kb = InlineKeyboardMarkup(); kb.add(InlineKeyboardButton(t(uid, "btn_premium"), callback_data="sub"))
-        bot.send_message(uid, t(uid, "limit_warning", left=remaining), reply_markup=kb)
 
     # Download in a thread so bot doesn't freeze
     threading.Thread(target=download_worker, args=(uid, url, user), daemon=True).start()
@@ -786,20 +696,12 @@ def download_worker(uid: int, url: str, user: tuple):
         if video_url:
             os.makedirs("downloads", exist_ok=True)
             bot.edit_message_text(t(uid, "downloading"), uid, status_msg.message_id)
-            r = requests.get(video_url, timeout=60, stream=True)
+            r = requests.get(video_url, timeout=60, stream=True,
+                headers={"User-Agent": "Mozilla/5.0"})
             filename = f"downloads/{uid}_{int(time.time())}.mp4"
-            total = int(r.headers.get("content-length", 0))
-            downloaded = 0; last_pct = -1
             with open(filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=65536):
-                    f.write(chunk); downloaded += len(chunk)
-                    if total:
-                        pct = int(downloaded / total * 100)
-                        if pct != last_pct and pct % 10 == 0:
-                            last_pct = pct
-                            bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-                            try: bot.edit_message_text(t(uid, "progress", pct=pct, bar=bar), uid, status_msg.message_id)
-                            except Exception: pass
+                for chunk in r.iter_content(chunk_size=1024*1024):
+                    f.write(chunk)
 
         # yt-dlp fallback
         if not filename or not os.path.exists(filename):
@@ -809,7 +711,10 @@ def download_worker(uid: int, url: str, user: tuple):
                 "format": "best[ext=mp4]/best",
                 "outtmpl": f"downloads/{uid}_%(id)s.%(ext)s",
                 "noplaylist": True, "quiet": True, "no_warnings": True,
-                "concurrent_fragment_downloads": 4, "merge_output_format": None,
+                "concurrent_fragment_downloads": 16,
+                "merge_output_format": None,
+                "http_chunk_size": 10485760,
+                "socket_timeout": 30,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -826,10 +731,9 @@ def download_worker(uid: int, url: str, user: tuple):
         try: bot.delete_message(uid, status_msg.message_id)
         except Exception: pass
 
-        remaining_after = max(0, get_remaining(user) - 1)
         kb = InlineKeyboardMarkup(); kb.add(InlineKeyboardButton(t(uid, "btn_more"), callback_data="download"))
         with open(filename, "rb") as f:
-            bot.send_video(uid, f, caption=t(uid, "done", left=remaining_after), reply_markup=kb)
+            bot.send_video(uid, f, caption=t(uid, "done"), reply_markup=kb)
 
         update_usage(user); log_download(uid, url, "ok")
 
@@ -847,7 +751,5 @@ def download_worker(uid: int, url: str, user: tuple):
 
 # ---------------- MAIN ---------------- #
 if __name__ == "__main__":
-    # Фоновый поток проверки истёкших подписок
-    threading.Thread(target=sub_expiry_checker, daemon=True).start()
     logger.info("🤖 Bot started (pyTelegramBotAPI)")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
